@@ -1,0 +1,55 @@
+version: "3.8"
+
+services:
+  cassandra:
+    image: cassandra:4.1
+    container_name: cassandra
+    ports:
+      - "9042:9042"
+    volumes:
+      # giữ init script
+      - ./cassandra-init:/cassandra-init
+      # mount lại volume cũ (ID e23f65…)
+      - cassandra_data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: outputdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: userpass
+    volumes:
+      # mount lại volume cũ (ID 505d22…)
+      - mysql_data:/var/lib/mysql
+
+  spark:
+    build: ./spark
+    container_name: spark
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      mysql:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
+    command: ["spark-submit", "--master", "local[*]", "/app/main.py"]
+
+volumes:
+  cassandra_data:
+    external: true
+    name: 505d225888054c0b06df215230a6cbea47e868b125e8ccc2fd7d12a78361630a
+    
+  mysql_data:
+    external: true
+    name: e23f658a0b30750b0bb648610bb4f3cb30cff99edfaf65e7f1e38e85536a2d37
