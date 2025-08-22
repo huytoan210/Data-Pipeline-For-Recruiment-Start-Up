@@ -7,9 +7,7 @@ services:
     ports:
       - "9042:9042"
     volumes:
-      # giữ init script
       - ./cassandra-init:/cassandra-init
-      # mount lại volume cũ (ID e23f65…)
       - cassandra_data:/var/lib/cassandra
     healthcheck:
       test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
@@ -30,8 +28,72 @@ services:
       MYSQL_USER: user
       MYSQL_PASSWORD: userpass
     volumes:
-      # mount lại volume cũ (ID 505d22…)
       - mysql_data:/var/lib/mysql
+
+  zookeeper:
+    image: bitnami/zookeeper:3.9
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+
+  kafka:
+    image: bitnami/kafka:3.6
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    depends_on:
+      - zookeeper
+
+  kafka-producer:
+    image: python:3.11-slim
+    container_name: kafka-producer
+    depends_on:
+      kafka:
+        condition: service_started
+      mysql:
+        condition: service_started
+    working_dir: /app
+    volumes:
+      - ./scripts:/app
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: outputdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: userpass
+      KAFKA_BROKER: kafka:9092
+      KAFKA_TOPIC: tracking
+    command: >
+      bash -lc "pip install --no-cache-dir kafka-python mysql-connector-python pandas &&
+      python /app/fake-data.py"
+
+  kafka-consumer:
+    image: python:3.11-slim
+    container_name: kafka-consumer
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    working_dir: /app
+    volumes:
+      - ./scripts:/app
+    environment:
+      CASSANDRA_HOST: cassandra
+      CASSANDRA_KEYSPACE: logs
+      KAFKA_BROKER: kafka:9092
+      KAFKA_TOPIC: tracking
+    command: >
+      bash -lc "pip install --no-cache-dir kafka-python cassandra-driver &&
+      python /app/kafka_to_cassandra.py"
 
   spark:
     build: ./spark

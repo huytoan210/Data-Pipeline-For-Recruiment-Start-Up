@@ -1,26 +1,29 @@
+import os
 import random
 import time
 import uuid
+import json
 from datetime import datetime
 
 import mysql.connector
 import pandas as pd
-from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster
-from cassandra.util import uuid_from_time
+from kafka import KafkaProducer
 
-# --- MySQL Config ---
-MYSQL_HOST = 'localhost'
-MYSQL_PORT = '3307'
-MYSQL_DB = 'outputdb'
-MYSQL_USER = 'user'
-MYSQL_PASSWORD = 'userpass'
+# --- MySQL Config (inside Docker use service name 'mysql') ---
+MYSQL_HOST = os.getenv('MYSQL_HOST', 'mysql')
+MYSQL_PORT = int(os.getenv('MYSQL_PORT', '3306'))
+MYSQL_DB = os.getenv('MYSQL_DATABASE', 'outputdb')
+MYSQL_USER = os.getenv('MYSQL_USER', 'user')
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'userpass')
 
-# --- Cassandra Config ---
-CASSANDRA_HOSTS = ['127.0.0.1']
-CASSANDRA_KEYSPACE = 'logs'
-CASSANDRA_USER = 'cassandra'
-CASSANDRA_PASSWORD = 'cassandra'
+# --- Kafka Config ---
+KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'kafka:9092')
+KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'tracking')
+
+producer = KafkaProducer(
+    bootstrap_servers=KAFKA_BROKER,
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
 
 def get_data_from_job():
     with mysql.connector.connect(
@@ -50,34 +53,25 @@ def get_data_from_publisher():
         """
         return pd.read_sql(query, cnx)
 
-def generate_dummy_data(session, n_records, job_list, campaign_list, company_list, group_list, publisher_list):
-    prepared = session.prepare("""
-    INSERT INTO tracking (create_time, bid, campaign_id, custom_track, group_id, job_id, publisher_id, ts)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """)
-    
+def generate_and_publish(n_records, job_list, campaign_list, company_list, group_list, publisher_list):
     interact_options = ['click', 'conversion', 'qualified', 'unqualified']
     weights = (70, 10, 10, 10)
-    
-    for _ in range(n_records):
-        now = datetime.now()
-        create_time = str(uuid_from_time(now))
-        bid = random.randint(0, 1)
-        custom_track = random.choices(interact_options, weights=weights)[0]
-        job_id = random.choice(job_list)
-        publisher_id = random.choice(publisher_list)
-        group_id = random.choice(group_list)
-        campaign_id = random.choice(campaign_list)
-        ts = now.strftime('%Y-%m-%d %H:%M:%S')
-        
-        session.execute(prepared, (create_time, bid, campaign_id, custom_track, group_id, job_id, publisher_id, ts))
-    
-    print(f"{n_records} records generated successfully.")
 
-# Establish Cassandra connection
-auth_provider = PlainTextAuthProvider(username=CASSANDRA_USER, password=CASSANDRA_PASSWORD)
-cluster = Cluster(contact_points=CASSANDRA_HOSTS, auth_provider=auth_provider)
-session = cluster.connect(CASSANDRA_KEYSPACE)
+    for _ in range(n_records):
+        now = datetime.utcnow()
+        event = {
+            "create_time": str(uuid.uuid1()),
+            "bid": float(random.randint(0, 1)),
+            "custom_track": random.choices(interact_options, weights=weights)[0],
+            "job_id": float(random.choice(job_list)) if job_list else None,
+            "publisher_id": float(random.choice(publisher_list)) if publisher_list else None,
+            "group_id": float(random.choice(group_list)) if group_list else None,
+            "campaign_id": float(random.choice(campaign_list)) if campaign_list else None,
+            "ts": now.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        producer.send(KAFKA_TOPIC, event)
+    producer.flush()
+    print(f"Published {n_records} records to Kafka topic '{KAFKA_TOPIC}'.")
 
 # Fetch static data once
 jobs_data = get_data_from_job()
@@ -85,12 +79,12 @@ publisher_data = get_data_from_publisher()
 
 job_list = jobs_data['job_id'].tolist()
 campaign_list = jobs_data['campaign_id'].tolist()
-company_list = jobs_data['company_id'].tolist()  # Note: company_list was defined but unused; kept for potential future use
+company_list = jobs_data['company_id'].tolist()
 group_list = jobs_data[jobs_data['group_id'].notnull()]['group_id'].astype(int).tolist()
 publisher_list = publisher_data['publisher_id'].tolist()
 
-# Infinite loop to generate data periodically
+# Infinite loop to generate and publish periodically
 while True:
     n_records = random.randint(1, 20)
-    generate_dummy_data(session, n_records, job_list, campaign_list, company_list, group_list, publisher_list)
+    generate_and_publish(n_records, job_list, campaign_list, company_list, group_list, publisher_list)
     time.sleep(20)
