@@ -207,12 +207,14 @@ docker-compose up spark
 
 ### (Optional) Stream Fake Data
 
-Keep fresh events flowing into Cassandra for continuous ETL tests.
+Keep fresh events flowing from Kafka to Cassandra by a consumer for continuous ETL tests.
+- The `kafka-producer` will continuously publish fake data into kafka topic and then be consumed by `kafka-consumer` and upserts to Cassandra table
 
-**Run from host:**
+**From the terminal:**
 
 ```bash
-python3 scripts/fake-data.py
+docker-compose up kafka-producer
+docker-compose up kafka-consumer
 ```
 
 ---
@@ -242,23 +244,6 @@ docker compose exec cassandra cqlsh -e "DESCRIBE TABLE logs.tracking;"
 
 ---
 
-### Common Commands
-
-```bash
-# Rebuild & restart everything
-docker compose up -d --build
-
-# View Spark run output
-docker logs spark -f
-
-# Open MySQL shell
-docker compose exec mysql mysql -uuser -puserpass outputdb
-
-# Open Cassandra shell
-docker compose exec cassandra cqlsh
-```
-
----
 
 ### Cleanup
 

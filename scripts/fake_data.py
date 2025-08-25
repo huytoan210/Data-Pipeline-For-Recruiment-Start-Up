@@ -58,7 +58,7 @@ def generate_and_publish(n_records, job_list, campaign_list, company_list, group
     weights = (70, 10, 10, 10)
 
     for _ in range(n_records):
-        now = datetime.utcnow()
+        now = datetime.now(datetime.timezone.utc)
         event = {
             "create_time": str(uuid.uuid1()),
             "bid": float(random.randint(0, 1)),
