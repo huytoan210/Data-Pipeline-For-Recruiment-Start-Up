@@ -73,7 +73,7 @@ services:
       KAFKA_TOPIC: tracking
     command: >
       bash -lc "pip install --no-cache-dir kafka-python mysql-connector-python pandas &&
-      python /app/fake-data.py"
+      python /app/fake_data.py"
 
   kafka-consumer:
     image: python:3.11-slim
